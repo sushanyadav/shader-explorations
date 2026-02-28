@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//var/folders/33/dncpzppd1jv37fjjwr206jp40000gn/T/chrome-devtools-mcp-CMy5ou/**)",
+      "Read(//private/var/folders/33/dncpzppd1jv37fjjwr206jp40000gn/T/chrome-devtools-mcp-CMy5ou/**)"
+    ]
+  }
+}
