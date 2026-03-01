@@ -39,6 +39,9 @@ const vertexShader = /* glsl */ `
   uniform float uStripH;
   uniform float uTwist;
   uniform float uFlatZone;
+  uniform float uFX;
+  uniform float uWiggle;
+  uniform float uTime;
 
   varying float vS;
   varying float vV;
@@ -93,6 +96,9 @@ const vertexShader = /* glsl */ `
     wp.y = py + rollY + cross * tny;
     wp.z = pz + rollZ + cross * tnz;
 
+    // Wiggle: traveling wave along the strip, spring-decays after scroll stops
+    wp.y += sin(s * 0.5 + uTime * 7.0) * uWiggle * 0.02;
+
     vS = s;
     vV = cross / uStripH + 0.5;
 
@@ -120,6 +126,7 @@ const fragmentShader = /* glsl */ `
   uniform float uEdgeVignette;
   uniform vec3 uBackColor;
   uniform float uFX;
+  uniform float uTime;
 
   varying float vS;
   varying float vV;
@@ -165,28 +172,7 @@ const fragmentShader = /* glsl */ `
     float u1 = gl_FrontFacing ? u0 : 1.0 - u0;
 
     float aspect = getAspect(idx);
-
-    // Displacement: sine wave that travels with scroll, magnitude driven by uFX
-    float dispV = sin(u1 * 4.5 + uScroll * 1.2) * uFX * 0.07;
-    float dispU = cos(vV  * 3.5 + uScroll * 0.8) * uFX * 0.03;
-    float ud = u1 + dispU;
-
-    // 3-tap: spread unifies chromatic aberration + motion blur into one distance.
-    // R from right tap, G weighted-average of all 3, B from left tap.
-    float spread = uFX * 0.06;
-
-    vec4 tapL = sampleTex(idx, coverUV(aspect, ud - spread, vV + dispV));
-    vec4 tapC = sampleTex(idx, coverUV(aspect, ud,           vV + dispV));
-    vec4 tapR = sampleTex(idx, coverUV(aspect, ud + spread,  vV + dispV));
-
-    vec4 col = vec4(
-      tapR.r,
-      (tapL.g + tapC.g * 2.0 + tapR.g) / 4.0,
-      tapL.b,
-      tapC.a
-    );
-    col.rgb = mix(col.rgb, 1.0 - col.rgb, uFX);
-
+    vec4 col = sampleTex(idx, coverUV(aspect, u1, vV));
     // Surface normal (raw, before flipping)
     vec3 rawN = normalize(vNormal);
 
@@ -320,6 +306,8 @@ function FilmStrip({
         value: new THREE.Color(config.backColor).convertSRGBToLinear(),
       },
       uFX: { value: 0.0 },
+      uWiggle: { value: 0.0 },
+      uTime: { value: 0.0 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [textures, aspects]
@@ -327,6 +315,7 @@ function FilmStrip({
 
   const { viewport } = useThree();
   const fxRef = useRef(0);
+  const wigglePosRef = useRef(0);
 
   useFrame(() => {
     if (!matRef.current) return;
@@ -359,11 +348,20 @@ function FilmStrip({
     u.uBackColor.value.set(config.backColor).convertSRGBToLinear();
 
     // FX: scroll-velocity driven chromatic aberration + photo negative
-    const vel = scrollRef.current.velocity;
-    const targetFX = Math.min(Math.abs(vel) / 800, 1);
-    const lerpFactor = targetFX > fxRef.current ? 0.15 : 0.025;
+    // lenis.velocity is px/ms (GSAP ticker passes seconds → raf(time*1000) → ms delta)
+    // typical scroll = 0.3–1.5 px/ms; multiply by 2 so effect peaks at ~0.5 px/ms
+    const vel = Math.abs(scrollRef.current.velocity);
+    const targetFX = vel > 0.08 ? Math.min(vel * 2, 1) : 0;
+    const lerpFactor = targetFX > fxRef.current ? 0.25 : 1.0;
     fxRef.current += (targetFX - fxRef.current) * lerpFactor;
     u.uFX.value = fxRef.current;
+
+    // Wiggle: fast attack on scroll, slow exponential decay when idle — no overshoot
+    const lerpW = targetFX > wigglePosRef.current ? 0.25 : 0.05;
+    wigglePosRef.current += (targetFX - wigglePosRef.current) * lerpW;
+    u.uWiggle.value = wigglePosRef.current;
+
+    u.uTime.value = performance.now() / 1000;
   });
 
   return (
