@@ -5,15 +5,26 @@ import type { MutableRefObject } from "react";
 import * as THREE from "three";
 import { useControls, folder } from "leva";
 
-const IMAGES = [
-  "/images/img-1.webp",
-  "/images/img-2.webp",
-  "/images/img-3.webp",
-  "/images/img-4.webp",
-  "/images/img-5.webp",
-];
+export const GALLERIES = {
+  interstellar: [
+    "/images/interstellar.webp",
+    "/images/image-w1280.webp",
+    "/images/interstellar-cooper-murph.webp",
+    "/images/interstellar-murph-adult.webp",
+    "/images/interstellar-cooper-helmet.webp",
+  ],
+  fightclub: [
+    "/images/fight-club.webp",
+    "/images/fight-club-tyler.webp",
+    "/images/fight-club-marla.webp",
+    "/images/fight-club-soap.webp",
+    "/images/fight-club-rules.webp",
+  ],
+} as const;
 
-const IMAGE_COUNT = IMAGES.length;
+export type GalleryKey = keyof typeof GALLERIES;
+
+const IMAGE_COUNT = 5;
 
 export type ScrollData = {
   progress: number;
@@ -65,13 +76,14 @@ const vertexShader = /* glsl */ `
     float st = sin(twistAngle);
 
     // Twisted cross-section vectors
+    // st sign kept: left end (st>0) tilts top toward camera, right end (st<0) tilts top AWAY
+    // This gives the right end the "face-down" look seen in the reference
     float tnx = nx * ct;
     float tny = ny * ct;
     float tnz = st;
 
     // Roll arc: path center rises/falls as ribbon twists.
-    // rollZ = 0 keeps both ends at the same Z depth — eliminates perspective size asymmetry
-    // (previously left end came toward camera, right went away, making them look different sizes)
+    // rollZ = 0 keeps both ends at same Z depth (no perspective size asymmetry)
     float rollY = sign(effective) * uAmp * (1.0 - ct);
     float rollZ = 0.0;
 
@@ -84,7 +96,7 @@ const vertexShader = /* glsl */ `
     vS = s;
     vV = cross / uStripH + 0.5;
 
-    // Surface normal
+    // Surface normal — derived from tangent × cross-section direction
     vNormal = vec3(ty * st, -tx * st, ct);
 
     gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
@@ -112,6 +124,34 @@ const fragmentShader = /* glsl */ `
   varying float vV;
   varying vec3 vNormal;
 
+  float getAspect(float idx) {
+    if (idx < 0.5) return uAspects[0];
+    else if (idx < 1.5) return uAspects[1];
+    else if (idx < 2.5) return uAspects[2];
+    else if (idx < 3.5) return uAspects[3];
+    else return uAspects[4];
+  }
+
+  vec2 coverUV(float ia, float rawU, float rawV) {
+    vec2 uv = vec2(rawU, rawV);
+    if (ia > uSegAspect) {
+      float sc = uSegAspect / ia;
+      uv.x = uv.x * sc + (1.0 - sc) * 0.5;
+    } else {
+      float sc = ia / uSegAspect;
+      uv.y = uv.y * sc + (1.0 - sc) * 0.5;
+    }
+    return uv;
+  }
+
+  vec4 sampleTex(float idx, vec2 uv) {
+    if (idx < 0.5) return texture2D(uTex0, uv);
+    else if (idx < 1.5) return texture2D(uTex1, uv);
+    else if (idx < 2.5) return texture2D(uTex2, uv);
+    else if (idx < 3.5) return texture2D(uTex3, uv);
+    else return texture2D(uTex4, uv);
+  }
+
   void main() {
     float cs = vS + uScroll;
     float f = cs / uSegW;
@@ -120,35 +160,10 @@ const fragmentShader = /* glsl */ `
     float idx = mod(rawIdx, uCount);
     if (idx < 0.0) idx += uCount;
 
-    // Mirror U on back face so photo reads correctly from behind
     float u0 = fract(f);
     float u1 = gl_FrontFacing ? u0 : 1.0 - u0;
-    vec2 uv = vec2(u1, vV);
 
-    // Aspect ratio for current image
-    float ia;
-    if (idx < 0.5) ia = uAspects[0];
-    else if (idx < 1.5) ia = uAspects[1];
-    else if (idx < 2.5) ia = uAspects[2];
-    else if (idx < 3.5) ia = uAspects[3];
-    else ia = uAspects[4];
-
-    // Cover fit
-    if (ia > uSegAspect) {
-      float sc = uSegAspect / ia;
-      uv.x = uv.x * sc + (1.0 - sc) * 0.5;
-    } else {
-      float sc = ia / uSegAspect;
-      uv.y = uv.y * sc + (1.0 - sc) * 0.5;
-    }
-
-    // Sample correct texture
-    vec4 col;
-    if (idx < 0.5) col = texture2D(uTex0, uv);
-    else if (idx < 1.5) col = texture2D(uTex1, uv);
-    else if (idx < 2.5) col = texture2D(uTex2, uv);
-    else if (idx < 3.5) col = texture2D(uTex3, uv);
-    else col = texture2D(uTex4, uv);
+    vec4 col = sampleTex(idx, coverUV(getAspect(idx), u1, vV));
 
     // Surface normal (raw, before flipping)
     vec3 rawN = normalize(vNormal);
@@ -169,17 +184,23 @@ const fragmentShader = /* glsl */ `
 
     float light = mix(uLightMin, uLightMax, diffuse * vignette * edgeShadow);
 
-    gl_FragColor = vec4(col.rgb * light, 1.0);
+    // Analytical AA: fade alpha to 0 over exactly 1 pixel at top/bottom ribbon edges
+    float dvV = fwidth(vV);
+    float edgeAlpha = smoothstep(0.0, dvV, vV) * smoothstep(1.0, 1.0 - dvV, vV);
+
+    gl_FragColor = vec4(col.rgb * light, edgeAlpha);
     #include <colorspace_fragment>
   }
 `;
 
 function FilmStrip({
   scrollRef,
+  images,
 }: {
   scrollRef: MutableRefObject<ScrollData>;
+  images: readonly string[];
 }) {
-  const textures = useTexture(IMAGES);
+  const textures = useTexture(images as string[]);
   const matRef = useRef<THREE.ShaderMaterial>(null);
 
   for (const tex of textures) {
@@ -197,24 +218,54 @@ function FilmStrip({
 
   const config = useControls({
     strip: folder({
-      segWidth: { value: 2.8, min: 0.5, max: 5, step: 0.1, label: "Seg Width" },
-      stripH: { value: 3.0, min: 0.5, max: 6, step: 0.1, label: "Strip Height" },
-      stripLen: { value: 40, min: 4, max: 60, step: 1, label: "Strip Length" },
+      segWidth: { value: 3.8, min: 0.5, max: 5, step: 0.1, label: "Seg Width" },
+      stripH: {
+        value: 2.2,
+        min: 0.5,
+        max: 6,
+        step: 0.1,
+        label: "Strip Height",
+      },
+      stripLen: { value: 32, min: 4, max: 60, step: 1, label: "Strip Length" },
     }),
     curve: folder({
-      curveFreq: { value: 0.12, min: 0.01, max: 0.4, step: 0.01, label: "Sigmoid Steepness" },
-      twist: { value: 2.5, min: 0, max: 6, step: 0.05, label: "End Twist" },
-      flatZone: { value: 0.2, min: 0, max: 0.95, step: 0.05, label: "Center Flat Zone" },
-      zDepth: { value: 1.0, min: 0, max: 4, step: 0.1, label: "Z Depth" },
+      curveFreq: {
+        value: 0.12,
+        min: 0.01,
+        max: 0.4,
+        step: 0.01,
+        label: "Sigmoid Steepness",
+      },
+      twist: { value: 3.55, min: 0, max: 6, step: 0.05, label: "End Twist" },
+      flatZone: {
+        value: 0.25,
+        min: 0,
+        max: 0.95,
+        step: 0.05,
+        label: "Center Flat Zone",
+      },
+      zDepth: { value: 3.2, min: 0, max: 4, step: 0.1, label: "Z Depth" },
     }),
     lighting: folder({
-      lightX: { value: 0.1, min: -1, max: 1, step: 0.05, label: "Light X" },
+      lightX: { value: -0.8, min: -1, max: 1, step: 0.05, label: "Light X" },
       lightY: { value: 0.25, min: -1, max: 1, step: 0.05, label: "Light Y" },
       lightZ: { value: 1.0, min: 0, max: 2, step: 0.05, label: "Light Z" },
       lightMin: { value: 0.6, min: 0, max: 1, step: 0.05, label: "Light Min" },
-      lightMax: { value: 1.0, min: 0.5, max: 1.5, step: 0.05, label: "Light Max" },
-      edgeVignette: { value: 0.3, min: 0, max: 1, step: 0.05, label: "Edge Vignette" },
-      backColor: { value: '#7A5C3E', label: "Back Color" },
+      lightMax: {
+        value: 1.0,
+        min: 0.5,
+        max: 1.5,
+        step: 0.05,
+        label: "Light Max",
+      },
+      edgeVignette: {
+        value: 0.3,
+        min: 0,
+        max: 1,
+        step: 0.05,
+        label: "Edge Vignette",
+      },
+      backColor: { value: "#7A5C3E", label: "Back Color" },
     }),
   });
 
@@ -237,11 +288,15 @@ function FilmStrip({
       uStripH: { value: config.stripH },
       uTwist: { value: config.twist },
       uFlatZone: { value: config.flatZone },
-      uLightDir: { value: new THREE.Vector3(config.lightX, config.lightY, config.lightZ) },
+      uLightDir: {
+        value: new THREE.Vector3(config.lightX, config.lightY, config.lightZ),
+      },
       uLightMin: { value: config.lightMin },
       uLightMax: { value: config.lightMax },
       uEdgeVignette: { value: config.edgeVignette },
-      uBackColor: { value: new THREE.Color(config.backColor).convertSRGBToLinear() },
+      uBackColor: {
+        value: new THREE.Color(config.backColor).convertSRGBToLinear(),
+      },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [textures, aspects]
@@ -289,6 +344,7 @@ function FilmStrip({
         fragmentShader={fragmentShader}
         uniforms={uniforms}
         side={THREE.DoubleSide}
+        transparent
       />
     </mesh>
   );
@@ -296,8 +352,16 @@ function FilmStrip({
 
 export function GalleryScene({
   scrollRef,
+  gallery,
 }: {
   scrollRef: MutableRefObject<ScrollData>;
+  gallery: GalleryKey;
 }) {
-  return <FilmStrip scrollRef={scrollRef} />;
+  return (
+    <FilmStrip
+      key={gallery}
+      scrollRef={scrollRef}
+      images={GALLERIES[gallery]}
+    />
+  );
 }
