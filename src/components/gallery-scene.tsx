@@ -119,6 +119,7 @@ const fragmentShader = /* glsl */ `
   uniform float uLightMax;
   uniform float uEdgeVignette;
   uniform vec3 uBackColor;
+  uniform float uFX;
 
   varying float vS;
   varying float vV;
@@ -163,7 +164,28 @@ const fragmentShader = /* glsl */ `
     float u0 = fract(f);
     float u1 = gl_FrontFacing ? u0 : 1.0 - u0;
 
-    vec4 col = sampleTex(idx, coverUV(getAspect(idx), u1, vV));
+    float aspect = getAspect(idx);
+
+    // Displacement: sine wave that travels with scroll, magnitude driven by uFX
+    float dispV = sin(u1 * 4.5 + uScroll * 1.2) * uFX * 0.07;
+    float dispU = cos(vV  * 3.5 + uScroll * 0.8) * uFX * 0.03;
+    float ud = u1 + dispU;
+
+    // 3-tap: spread unifies chromatic aberration + motion blur into one distance.
+    // R from right tap, G weighted-average of all 3, B from left tap.
+    float spread = uFX * 0.06;
+
+    vec4 tapL = sampleTex(idx, coverUV(aspect, ud - spread, vV + dispV));
+    vec4 tapC = sampleTex(idx, coverUV(aspect, ud,           vV + dispV));
+    vec4 tapR = sampleTex(idx, coverUV(aspect, ud + spread,  vV + dispV));
+
+    vec4 col = vec4(
+      tapR.r,
+      (tapL.g + tapC.g * 2.0 + tapR.g) / 4.0,
+      tapL.b,
+      tapC.a
+    );
+    col.rgb = mix(col.rgb, 1.0 - col.rgb, uFX);
 
     // Surface normal (raw, before flipping)
     vec3 rawN = normalize(vNormal);
@@ -297,12 +319,14 @@ function FilmStrip({
       uBackColor: {
         value: new THREE.Color(config.backColor).convertSRGBToLinear(),
       },
+      uFX: { value: 0.0 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [textures, aspects]
   );
 
   const { viewport } = useThree();
+  const fxRef = useRef(0);
 
   useFrame(() => {
     if (!matRef.current) return;
@@ -333,6 +357,13 @@ function FilmStrip({
     u.uLightMax.value = config.lightMax;
     u.uEdgeVignette.value = config.edgeVignette;
     u.uBackColor.value.set(config.backColor).convertSRGBToLinear();
+
+    // FX: scroll-velocity driven chromatic aberration + photo negative
+    const vel = scrollRef.current.velocity;
+    const targetFX = Math.min(Math.abs(vel) / 800, 1);
+    const lerpFactor = targetFX > fxRef.current ? 0.15 : 0.025;
+    fxRef.current += (targetFX - fxRef.current) * lerpFactor;
+    u.uFX.value = fxRef.current;
   });
 
   return (
