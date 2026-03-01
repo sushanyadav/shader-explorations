@@ -27,7 +27,7 @@ const vertexShader = /* glsl */ `
   uniform float uZDepth;
   uniform float uStripH;
   uniform float uTwist;
-  uniform float uZSpread;
+  uniform float uFlatZone;
 
   varying float vS;
   varying float vV;
@@ -50,10 +50,10 @@ const vertexShader = /* glsl */ `
     float px = s * ca + dev * (-sa);
     float py = s * sa + dev * ca;
 
-    // Z depth: gaussian, center closer to camera
-    float pz = uZDepth * exp(-s * s * uZSpread);
+    // Z depth: gaussian bump — center bows toward camera, ends fold back
+    float pz = uZDepth * exp(-s * s * 0.020);
 
-    // Tangent direction (derivative of path)
+    // Tangent direction (derivative of XY path)
     float ddev = uAmp * uFreq * cosT;
     float tx = ca + ddev * (-sa);
     float ty = sa + ddev * ca;
@@ -65,8 +65,12 @@ const vertexShader = /* glsl */ `
     float nx = -ty;
     float ny = tx;
 
-    // Twist follows the curvature — banks at the bends, flat at straight sections
-    float twistAngle = uTwist * sinT;
+    // Flat-center twist: dead-band of uFlatZone at center, ramps to full at ends
+    // uFlatZone=0 → normal sinT twist; uFlatZone=0.8 → long flat center, sharp ends
+    float ts = abs(sinT);
+    // Negate sign so left end twists UP, right end twists DOWN
+    float effective = -sign(sinT) * max(0.0, ts - uFlatZone) / max(0.001, 1.0 - uFlatZone);
+    float twistAngle = uTwist * effective;
     float ct = cos(twistAngle);
     float st = sin(twistAngle);
 
@@ -197,24 +201,24 @@ function FilmStrip({
   const config = useControls({
     strip: folder({
       segWidth: { value: 2.2, min: 0.5, max: 5, step: 0.1, label: "Seg Width" },
-      stripH: { value: 3.8, min: 1, max: 8, step: 0.1, label: "Strip Height" },
-      stripLen: { value: 30, min: 10, max: 60, step: 1, label: "Strip Length" },
+      stripH: { value: 1.8, min: 0.5, max: 6, step: 0.1, label: "Strip Height" },
+      stripLen: { value: 34, min: 4, max: 60, step: 1, label: "Strip Length" },
     }),
     curve: folder({
-      pathAngle: { value: 0.18, min: 0, max: 0.8, step: 0.01, label: "Path Angle" },
-      curveAmp: { value: 3.2, min: 0, max: 8, step: 0.1, label: "Curve Amp" },
-      curveFreq: { value: 0.18, min: 0.01, max: 0.6, step: 0.01, label: "Curve Freq" },
-      zDepth: { value: 1.6, min: 0, max: 5, step: 0.1, label: "Z Depth" },
-      zSpread: { value: 0.015, min: 0.001, max: 0.1, step: 0.001, label: "Z Spread" },
-      twist: { value: 1.6, min: 0, max: 4, step: 0.05, label: "Twist" },
+      pathAngle: { value: 0.0, min: -0.8, max: 0.8, step: 0.01, label: "Path Angle" },
+      curveAmp: { value: 0.1, min: 0, max: 10, step: 0.05, label: "Curve Amp" },
+      curveFreq: { value: 0.11, min: 0.01, max: 0.6, step: 0.01, label: "Curve Freq" },
+      zDepth: { value: 2.0, min: 0, max: 6, step: 0.1, label: "Z Depth" },
+      twist: { value: 5.0, min: 0, max: 8, step: 0.05, label: "Twist" },
+      flatZone: { value: 0.25, min: 0, max: 0.95, step: 0.05, label: "Center Flat" },
     }),
     lighting: folder({
       lightX: { value: 0.1, min: -1, max: 1, step: 0.05, label: "Light X" },
       lightY: { value: 0.25, min: -1, max: 1, step: 0.05, label: "Light Y" },
       lightZ: { value: 1.0, min: 0, max: 2, step: 0.05, label: "Light Z" },
-      lightMin: { value: 0.7, min: 0, max: 1, step: 0.05, label: "Light Min" },
+      lightMin: { value: 0.6, min: 0, max: 1, step: 0.05, label: "Light Min" },
       lightMax: { value: 1.0, min: 0.5, max: 1.5, step: 0.05, label: "Light Max" },
-      edgeVignette: { value: 0.2, min: 0, max: 1, step: 0.05, label: "Edge Vignette" },
+      edgeVignette: { value: 0.3, min: 0, max: 1, step: 0.05, label: "Edge Vignette" },
       backColor: { value: '#7A5C3E', label: "Back Color" },
     }),
   });
@@ -235,9 +239,9 @@ function FilmStrip({
       uAmp: { value: config.curveAmp },
       uFreq: { value: config.curveFreq },
       uZDepth: { value: config.zDepth },
-      uZSpread: { value: config.zSpread },
       uStripH: { value: config.stripH },
       uTwist: { value: config.twist },
+      uFlatZone: { value: config.flatZone },
       uLightDir: { value: new THREE.Vector3(config.lightX, config.lightY, config.lightZ) },
       uLightMin: { value: config.lightMin },
       uLightMax: { value: config.lightMax },
@@ -263,9 +267,9 @@ function FilmStrip({
     u.uAmp.value = config.curveAmp;
     u.uFreq.value = config.curveFreq;
     u.uZDepth.value = config.zDepth;
-    u.uZSpread.value = config.zSpread;
     u.uStripH.value = config.stripH;
     u.uTwist.value = config.twist;
+    u.uFlatZone.value = config.flatZone;
     u.uLightDir.value.set(config.lightX, config.lightY, config.lightZ);
     u.uLightMin.value = config.lightMin;
     u.uLightMax.value = config.lightMax;
@@ -275,7 +279,7 @@ function FilmStrip({
 
   return (
     <mesh frustumCulled={false}>
-      <planeGeometry args={[config.stripLen, config.stripH, 256, 16]} />
+      <planeGeometry args={[config.stripLen, config.stripH, 256, 32]} />
       <shaderMaterial
         ref={matRef}
         vertexShader={vertexShader}

@@ -20,7 +20,7 @@ export function ScrollGallery() {
     <>
       <div className="fixed inset-0 z-50 pointer-events-none">
         <Canvas
-          camera={{ position: [0, 0, 8], fov: 50 }}
+          camera={{ position: [0, 0, 10], fov: 52 }}
           dpr={[1, 2]}
           gl={{ antialias: true }}
           onCreated={({ gl }) => {
