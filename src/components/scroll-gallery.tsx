@@ -39,7 +39,7 @@ export function ScrollGallery() {
 
   return (
     <>
-      <Leva />
+      <Leva hidden />
       <div className="fixed inset-0 z-50 pointer-events-none">
         <Canvas
           camera={{ position: [0, 0, 10], fov: 52 }}
