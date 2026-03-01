@@ -1,4 +1,4 @@
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import { useRef, useMemo } from "react";
 import type { MutableRefObject } from "react";
@@ -40,50 +40,46 @@ const vertexShader = /* glsl */ `
     float ca = cos(uAngle);
     float sa = sin(uAngle);
 
-    // S-curve path (sine wave — smooth, flowing curves)
-    float t = s * uFreq;
-    float sinT = sin(t);
-    float cosT = cos(t);
-    float dev = uAmp * sinT;
-
-    // Position along path
-    float px = s * ca + dev * (-sa);
-    float py = s * sa + dev * ca;
-
-    // Z depth: gaussian bump — center bows toward camera, ends fold back
+    float px = s * ca;
+    float py = s * sa;
     float pz = uZDepth * exp(-s * s * 0.020);
 
-    // Tangent direction (derivative of XY path)
-    float ddev = uAmp * uFreq * cosT;
-    float tx = ca + ddev * (-sa);
-    float ty = sa + ddev * ca;
-    float tl = inversesqrt(tx * tx + ty * ty);
-    tx *= tl;
-    ty *= tl;
+    // Tangent is horizontal (flat path)
+    float tx = ca;
+    float ty = sa;
 
-    // Normal perpendicular to tangent (in XY plane)
+    // Cross-section normal (perpendicular to tangent in XY)
     float nx = -ty;
-    float ny = tx;
+    float ny =  tx;
 
-    // Flat-center twist: dead-band of uFlatZone at center, ramps to full at ends
-    // uFlatZone=0 → normal sinT twist; uFlatZone=0.8 → long flat center, sharp ends
-    float ts = abs(sinT);
-    // Negate sign so left end twists UP, right end twists DOWN
-    float effective = -sign(sinT) * max(0.0, ts - uFlatZone) / max(0.001, 1.0 - uFlatZone);
+    // Use tanh (sigmoid) instead of sin so the twist MONOTONICALLY increases
+    // from center outward — no peak/reversal, guaranteed perfect left/right symmetry.
+    // tanh(-s) = -tanh(s) ensures both ends bend by identical amounts.
+    float tsig = tanh(s * uFreq);          // monotonic: -1 (far left) → 0 (center) → +1 (far right)
+    float t01  = smoothstep(uFlatZone, 1.0, abs(tsig));
+    // Left (s<0): tsig<0 → effective>0 → rollY>0 → sweeps UP
+    // Right (s>0): tsig>0 → effective<0 → rollY<0 → sweeps DOWN
+    float effective  = -sign(tsig) * t01;
     float twistAngle = uTwist * effective;
     float ct = cos(twistAngle);
     float st = sin(twistAngle);
 
-    // Twisted cross-section
+    // Twisted cross-section vectors
     float tnx = nx * ct;
     float tny = ny * ct;
     float tnz = st;
 
-    // World position: path center + twisted cross-section
+    // Roll arc: path center rises/falls as ribbon twists.
+    // rollZ = 0 keeps both ends at the same Z depth — eliminates perspective size asymmetry
+    // (previously left end came toward camera, right went away, making them look different sizes)
+    float rollY = sign(effective) * uAmp * (1.0 - ct);
+    float rollZ = 0.0;
+
+    // World position: flat path + roll arc + twisted cross-section
     vec3 wp;
     wp.x = px + cross * tnx;
-    wp.y = py + cross * tny;
-    wp.z = pz + cross * tnz;
+    wp.y = py + rollY + cross * tny;
+    wp.z = pz + rollZ + cross * tnz;
 
     vS = s;
     vV = cross / uStripH + 0.5;
@@ -124,7 +120,10 @@ const fragmentShader = /* glsl */ `
     float idx = mod(rawIdx, uCount);
     if (idx < 0.0) idx += uCount;
 
-    vec2 uv = vec2(fract(f), vV);
+    // Mirror U on back face so photo reads correctly from behind
+    float u0 = fract(f);
+    float u1 = gl_FrontFacing ? u0 : 1.0 - u0;
+    vec2 uv = vec2(u1, vV);
 
     // Aspect ratio for current image
     float ia;
@@ -170,10 +169,7 @@ const fragmentShader = /* glsl */ `
 
     float light = mix(uLightMin, uLightMax, diffuse * vignette * edgeShadow);
 
-    // Smooth front/back blend — rawN.z > 0 faces camera, < 0 faces away
-    // Creates a natural gradient at the fold instead of a hard edge
-    float frontMix = smoothstep(-0.1, 0.3, rawN.z);
-    gl_FragColor = vec4(mix(uBackColor * light, col.rgb * light, frontMix), 1.0);
+    gl_FragColor = vec4(col.rgb * light, 1.0);
     #include <colorspace_fragment>
   }
 `;
@@ -192,25 +188,24 @@ function FilmStrip({
 
   const aspects = useMemo(
     () =>
-      textures.map((tex) =>
-        tex.image ? tex.image.width / tex.image.height : 1
-      ),
+      textures.map((tex) => {
+        const img = tex.image as { width?: number; height?: number } | null;
+        return img?.width && img?.height ? img.width / img.height : 1;
+      }),
     [textures]
   );
 
   const config = useControls({
     strip: folder({
-      segWidth: { value: 2.2, min: 0.5, max: 5, step: 0.1, label: "Seg Width" },
-      stripH: { value: 1.8, min: 0.5, max: 6, step: 0.1, label: "Strip Height" },
-      stripLen: { value: 34, min: 4, max: 60, step: 1, label: "Strip Length" },
+      segWidth: { value: 2.8, min: 0.5, max: 5, step: 0.1, label: "Seg Width" },
+      stripH: { value: 3.0, min: 0.5, max: 6, step: 0.1, label: "Strip Height" },
+      stripLen: { value: 40, min: 4, max: 60, step: 1, label: "Strip Length" },
     }),
     curve: folder({
-      pathAngle: { value: 0.0, min: -0.8, max: 0.8, step: 0.01, label: "Path Angle" },
-      curveAmp: { value: 0.1, min: 0, max: 10, step: 0.05, label: "Curve Amp" },
-      curveFreq: { value: 0.11, min: 0.01, max: 0.6, step: 0.01, label: "Curve Freq" },
-      zDepth: { value: 2.0, min: 0, max: 6, step: 0.1, label: "Z Depth" },
-      twist: { value: 5.0, min: 0, max: 8, step: 0.05, label: "Twist" },
-      flatZone: { value: 0.25, min: 0, max: 0.95, step: 0.05, label: "Center Flat" },
+      curveFreq: { value: 0.12, min: 0.01, max: 0.4, step: 0.01, label: "Sigmoid Steepness" },
+      twist: { value: 2.5, min: 0, max: 6, step: 0.05, label: "End Twist" },
+      flatZone: { value: 0.2, min: 0, max: 0.95, step: 0.05, label: "Center Flat Zone" },
+      zDepth: { value: 1.0, min: 0, max: 4, step: 0.1, label: "Z Depth" },
     }),
     lighting: folder({
       lightX: { value: 0.1, min: -1, max: 1, step: 0.05, label: "Light X" },
@@ -235,8 +230,8 @@ function FilmStrip({
       uCount: { value: IMAGE_COUNT },
       uSegAspect: { value: config.segWidth / config.stripH },
       uAspects: { value: aspects },
-      uAngle: { value: config.pathAngle },
-      uAmp: { value: config.curveAmp },
+      uAngle: { value: 0.0 },
+      uAmp: { value: 3.0 },
       uFreq: { value: config.curveFreq },
       uZDepth: { value: config.zDepth },
       uStripH: { value: config.stripH },
@@ -252,6 +247,8 @@ function FilmStrip({
     [textures, aspects]
   );
 
+  const { viewport } = useThree();
+
   useFrame(() => {
     if (!matRef.current) return;
     const u = matRef.current.uniforms;
@@ -260,11 +257,17 @@ function FilmStrip({
     const cycle = IMAGE_COUNT * config.segWidth;
     u.uScroll.value = scrollRef.current.progress * cycle;
 
+    // Dynamic curveAmp: ribbon ends always touch viewport corners regardless of aspect ratio
+    // Formula: rollY_at_end + strip_edge_offset = viewport half-height
+    // rollY = amp*(1-cosθ),  strip_edge = (stripH/2)*cosθ  →  amp = (halfH - h*cosθ)/(1-cosθ)
+    const cosT = Math.cos(config.twist);
+    const halfH = viewport.height / 2;
+    const dynamicAmp = (halfH - (config.stripH / 2) * cosT) / (1 - cosT);
+
     // Sync Leva values to uniforms every frame
     u.uSegW.value = config.segWidth;
     u.uSegAspect.value = config.segWidth / config.stripH;
-    u.uAngle.value = config.pathAngle;
-    u.uAmp.value = config.curveAmp;
+    u.uAmp.value = dynamicAmp;
     u.uFreq.value = config.curveFreq;
     u.uZDepth.value = config.zDepth;
     u.uStripH.value = config.stripH;

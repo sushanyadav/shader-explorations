@@ -1,12 +1,27 @@
 "use client";
 
-import { Suspense, useRef } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Suspense, useRef, useEffect } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { useLenis } from "lenis/react";
 import * as THREE from "three";
 import { GalleryScene, type ScrollData } from "./gallery-scene";
 
 const IMAGE_COUNT = 5;
+// Fix visible world HEIGHT (not width) — keeps halfH constant across all aspect ratios
+// With halfH = 5, the dynamic curveAmp formula gives a consistent result on every screen
+const TARGET_WORLD_HEIGHT = 10;
+
+function CameraRig() {
+  const { camera, size } = useThree();
+  useEffect(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    const fovRad = (cam.fov * Math.PI) / 180;
+    // No aspect factor — fixes HEIGHT, width scales with screen aspect ratio
+    cam.position.z = TARGET_WORLD_HEIGHT / (2 * Math.tan(fovRad / 2));
+    cam.updateProjectionMatrix();
+  }, [camera, size]);
+  return null;
+}
 
 export function ScrollGallery() {
   const scrollRef = useRef<ScrollData>({ progress: 0, velocity: 0 });
@@ -28,6 +43,7 @@ export function ScrollGallery() {
           }}
         >
           <color attach="background" args={["#f5f5f5"]} />
+          <CameraRig />
           <Suspense fallback={null}>
             <GalleryScene scrollRef={scrollRef} />
           </Suspense>
