@@ -25,7 +25,15 @@ type CallbackEntry = {
   priority: number;
 };
 
-export function LenisProvider({ children }: { children: React.ReactNode }) {
+type LenisProviderProps = {
+  children: React.ReactNode;
+  infinite?: boolean;
+};
+
+export function LenisProvider({
+  children,
+  infinite = false,
+}: LenisProviderProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const callbacksRef = useRef<CallbackEntry[]>([]);
@@ -38,6 +46,7 @@ export function LenisProvider({ children }: { children: React.ReactNode }) {
     if (!wrapper) return;
 
     ScrollTrigger.defaults({ scroller: wrapper });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: gate children until ScrollTrigger scroller default is set
     setScrollerReady(true);
 
     return () => {
@@ -57,7 +66,7 @@ export function LenisProvider({ children }: { children: React.ReactNode }) {
       lerp: 0.12,
       wheelMultiplier: 1.2,
       touchMultiplier: 2,
-      infinite: true,
+      infinite,
       autoRaf: false,
     });
 
@@ -84,7 +93,7 @@ export function LenisProvider({ children }: { children: React.ReactNode }) {
       lenisInstance.destroy();
       setLenis(null);
     };
-  }, []);
+  }, [infinite]);
 
   // Mouse drag to scroll with momentum throw
   useEffect(() => {

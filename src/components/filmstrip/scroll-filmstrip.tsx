@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { useLenis } from "lenis/react";
 import * as THREE from "three";
 import { Leva } from "leva";
-import { GalleryScene, type ScrollData } from "./gallery-scene";
+import { FilmstripScene, type ScrollData } from "./filmstrip-scene";
 
 const IMAGE_COUNT = 5;
 // Fix visible world HEIGHT (not width) — keeps halfH constant across all aspect ratios
@@ -25,9 +25,9 @@ function CameraRig() {
   return null;
 }
 
-export function ScrollGallery() {
+export function ScrollFilmstrip() {
   const scrollRef = useRef<ScrollData>({ progress: 0, velocity: 0 });
-  const gallery = "interstellar" as const;
+  const filmstrip = "interstellar" as const;
 
   useLenis((lenis) => {
     scrollRef.current.progress = lenis.progress;
@@ -49,7 +49,7 @@ export function ScrollGallery() {
           <color attach="background" args={["#f5f5f5"]} />
           <CameraRig />
           <Suspense fallback={null}>
-            <GalleryScene scrollRef={scrollRef} gallery={gallery} />
+            <FilmstripScene scrollRef={scrollRef} filmstrip={filmstrip} />
           </Suspense>
         </Canvas>
       </div>

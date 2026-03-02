@@ -5,7 +5,7 @@ import type { MutableRefObject } from "react";
 import * as THREE from "three";
 import { useControls, folder } from "leva";
 
-export const GALLERIES = {
+export const FILMSTRIPS = {
   interstellar: [
     "/images/interstellar.webp",
     "/images/image-w1280.webp",
@@ -22,7 +22,7 @@ export const GALLERIES = {
   ],
 } as const;
 
-export type GalleryKey = keyof typeof GALLERIES;
+export type FilmstripKey = keyof typeof FILMSTRIPS;
 
 const IMAGE_COUNT = 5;
 
@@ -42,13 +42,16 @@ const vertexShader = /* glsl */ `
   uniform float uFX;
   uniform float uWiggle;
   uniform float uTime;
+  uniform float uCurlRadius;
 
   varying float vS;
   varying float vV;
+  varying float vTwistAngle;
+  varying vec3 vNormal;
 
   void main() {
     float s = position.x;
-    float cross = position.y;
+    float crs = position.y;
 
     float ca = cos(uAngle);
     float sa = sin(uAngle);
@@ -57,49 +60,45 @@ const vertexShader = /* glsl */ `
     float py = s * sa;
     float pz = uZDepth * exp(-s * s * 0.020);
 
-    // Tangent is horizontal (flat path)
-    float tx = ca;
-    float ty = sa;
-
     // Cross-section normal (perpendicular to tangent in XY)
-    float nx = -ty;
-    float ny =  tx;
+    float nx = -sa;
+    float ny =  ca;
 
     // Use tanh (sigmoid) instead of sin so the twist MONOTONICALLY increases
     // from center outward — no peak/reversal, guaranteed perfect left/right symmetry.
-    // tanh(-s) = -tanh(s) ensures both ends bend by identical amounts.
-    float tsig = tanh(s * uFreq);          // monotonic: -1 (far left) → 0 (center) → +1 (far right)
+    float tsig = tanh(s * uFreq);
     float t01  = smoothstep(uFlatZone, 1.0, abs(tsig));
-    // Left (s<0): tsig<0 → effective>0 → rollY>0 → sweeps UP
-    // Right (s>0): tsig>0 → effective<0 → rollY<0 → sweeps DOWN
     float effective  = -sign(tsig) * t01;
     float twistAngle = uTwist * effective;
     float ct = cos(twistAngle);
     float st = sin(twistAngle);
 
     // Twisted cross-section vectors
-    // st sign kept: left end (st>0) tilts top toward camera, right end (st<0) tilts top AWAY
-    // This gives the right end the "face-down" look seen in the reference
     float tnx = nx * ct;
     float tny = ny * ct;
     float tnz = st;
 
-    // Roll arc: path center rises/falls as ribbon twists.
-    // rollZ = 0 keeps both ends at same Z depth (no perspective size asymmetry)
+    // Roll arc + page curl Z bulge
     float rollY = sign(effective) * uAmp * (1.0 - ct);
-    float rollZ = 0.0;
+    float rollZ = uCurlRadius * (1.0 - cos(abs(twistAngle)));
 
     // World position: flat path + roll arc + twisted cross-section
     vec3 wp;
-    wp.x = px + cross * tnx;
-    wp.y = py + rollY + cross * tny;
-    wp.z = pz + rollZ + cross * tnz;
+    wp.x = px + crs * tnx;
+    wp.y = py + rollY + crs * tny;
+    wp.z = pz + rollZ + crs * tnz;
 
     // Wiggle: traveling wave along the strip, spring-decays after scroll stops
     wp.y += sin(s * 0.5 + uTime * 7.0) * uWiggle * 0.02;
 
+    // Surface normal: strip-tangent × cross-section direction
+    vec3 T = vec3(ca, sa, 0.0);
+    vec3 B = vec3(tnx, tny, tnz);
+    vNormal = normalize(cross(T, B));
+
     vS = s;
-    vV = cross / uStripH + 0.5;
+    vV = crs / uStripH + 0.5;
+    vTwistAngle = twistAngle;
 
     gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
   }
@@ -118,9 +117,15 @@ const fragmentShader = /* glsl */ `
   uniform float uAspects[5];
   uniform float uFX;
   uniform float uTime;
+  uniform float uShadow;
+  uniform float uShininess;
+  uniform float uSpecular;
+  uniform float uCrease;
 
   varying float vS;
   varying float vV;
+  varying float vTwistAngle;
+  varying vec3 vNormal;
 
   float getAspect(float idx) {
     if (idx < 0.5) return uAspects[0];
@@ -163,6 +168,34 @@ const fragmentShader = /* glsl */ `
 
     float aspect = getAspect(idx);
     vec4 col = sampleTex(idx, coverUV(aspect, u1, vV));
+
+    // --- Magazine lighting ---
+    // Simulate slight page concavity: top/bottom edges tilt away from viewer
+    // This creates a visible light gradient even on the flat center
+    float pageBend = (vV - 0.5) * 2.0;
+    vec3 rawN = gl_FrontFacing ? vNormal : -vNormal;
+    vec3 N = normalize(rawN + vec3(0.0, pageBend * 0.25, 0.0));
+
+    vec3 L = normalize(vec3(0.3, 0.8, 0.4));   // overhead light, angled toward viewer
+    vec3 V = vec3(0.0, 0.0, 1.0);              // view direction (camera along +Z)
+    vec3 H = normalize(L + V);
+
+    // Diffuse: wide range so curled parts darken noticeably
+    float NdotL = dot(N, L);
+    float diffuse = mix(0.5, 1.1, NdotL * 0.5 + 0.5);
+
+    // Specular: glossy magazine highlight (wide lobe for visible shine)
+    float NdotH = max(dot(N, H), 0.0);
+    float spec = pow(NdotH, uShininess) * uSpecular;
+
+    // Center crease: magazine spine shadow (narrow Gaussian at s=0)
+    float crease = exp(-vS * vS * 6.0) * uCrease;
+
+    // Fold shadow: ambient-occlusion inside the curl zone
+    float absTwist = abs(vTwistAngle);
+    float foldShadow = sin(min(absTwist, 3.14159265)) * uShadow;
+
+    col.rgb = col.rgb * diffuse * (1.0 - foldShadow) * (1.0 - crease) + vec3(spec);
 
     // Analytical AA: fade alpha to 0 over exactly 1 pixel at top/bottom ribbon edges
     float dvV = fwidth(vV);
@@ -210,21 +243,26 @@ function FilmStrip({
     }),
     curve: folder({
       curveFreq: {
-        value: 0.12,
+        value: 0.16,
         min: 0.01,
         max: 0.4,
         step: 0.01,
         label: "Sigmoid Steepness",
       },
-      twist: { value: 3.55, min: 0, max: 6, step: 0.05, label: "End Twist" },
+      twist: { value: 4.2, min: 0, max: 6, step: 0.05, label: "End Twist" },
       flatZone: {
-        value: 0.25,
+        value: 0.18,
         min: 0,
         max: 0.95,
         step: 0.05,
         label: "Center Flat Zone",
       },
       zDepth: { value: 3.2, min: 0, max: 4, step: 0.1, label: "Z Depth" },
+      curlRadius: { value: 3.0, min: 0, max: 5, step: 0.05, label: "Curl Radius" },
+      shadow: { value: 0.35, min: 0, max: 1, step: 0.05, label: "Fold Shadow" },
+      shininess: { value: 24, min: 4, max: 128, step: 4, label: "Shininess" },
+      specular: { value: 0.5, min: 0, max: 1, step: 0.05, label: "Specular" },
+      crease: { value: 0.3, min: 0, max: 1, step: 0.05, label: "Spine Crease" },
     }),
   });
 
@@ -250,6 +288,11 @@ function FilmStrip({
       uFX: { value: 0.0 },
       uWiggle: { value: 0.0 },
       uTime: { value: 0.0 },
+      uCurlRadius: { value: 1.5 },
+      uShadow: { value: 0.35 },
+      uShininess: { value: 24 },
+      uSpecular: { value: 0.5 },
+      uCrease: { value: 0.3 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [textures, aspects]
@@ -283,6 +326,11 @@ function FilmStrip({
     u.uStripH.value = config.stripH;
     u.uTwist.value = config.twist;
     u.uFlatZone.value = config.flatZone;
+    u.uCurlRadius.value = config.curlRadius;
+    u.uShadow.value = config.shadow;
+    u.uShininess.value = config.shininess;
+    u.uSpecular.value = config.specular;
+    u.uCrease.value = config.crease;
     // FX: scroll-velocity driven chromatic aberration + photo negative
     // lenis.velocity is px/ms (GSAP ticker passes seconds → raf(time*1000) → ms delta)
     // typical scroll = 0.3–1.5 px/ms; multiply by 2 so effect peaks at ~0.5 px/ms
@@ -315,18 +363,18 @@ function FilmStrip({
   );
 }
 
-export function GalleryScene({
+export function FilmstripScene({
   scrollRef,
-  gallery,
+  filmstrip,
 }: {
   scrollRef: MutableRefObject<ScrollData>;
-  gallery: GalleryKey;
+  filmstrip: FilmstripKey;
 }) {
   return (
     <FilmStrip
-      key={gallery}
+      key={filmstrip}
       scrollRef={scrollRef}
-      images={GALLERIES[gallery]}
+      images={FILMSTRIPS[filmstrip]}
     />
   );
 }
