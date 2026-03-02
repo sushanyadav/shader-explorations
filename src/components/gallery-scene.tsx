@@ -45,7 +45,6 @@ const vertexShader = /* glsl */ `
 
   varying float vS;
   varying float vV;
-  varying vec3 vNormal;
 
   void main() {
     float s = position.x;
@@ -102,9 +101,6 @@ const vertexShader = /* glsl */ `
     vS = s;
     vV = cross / uStripH + 0.5;
 
-    // Surface normal — derived from tangent × cross-section direction
-    vNormal = vec3(ty * st, -tx * st, ct);
-
     gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
   }
 `;
@@ -120,17 +116,11 @@ const fragmentShader = /* glsl */ `
   uniform float uCount;
   uniform float uSegAspect;
   uniform float uAspects[5];
-  uniform vec3 uLightDir;
-  uniform float uLightMin;
-  uniform float uLightMax;
-  uniform float uEdgeVignette;
-  uniform vec3 uBackColor;
   uniform float uFX;
   uniform float uTime;
 
   varying float vS;
   varying float vV;
-  varying vec3 vNormal;
 
   float getAspect(float idx) {
     if (idx < 0.5) return uAspects[0];
@@ -173,30 +163,12 @@ const fragmentShader = /* glsl */ `
 
     float aspect = getAspect(idx);
     vec4 col = sampleTex(idx, coverUV(aspect, u1, vV));
-    // Surface normal (raw, before flipping)
-    vec3 rawN = normalize(vNormal);
-
-    // Fresnel edge shadow — darkens at ribbon folds (edge-on to camera)
-    float edgeShadow = smoothstep(0.0, 0.35, abs(rawN.z));
-
-    // Lighting — flip normal for back faces so lighting is consistent
-    vec3 N = gl_FrontFacing ? rawN : -rawN;
-    vec3 L = normalize(uLightDir);
-    float NdL = dot(N, L);
-    float diffuse = NdL * 0.5 + 0.5; // half-Lambert
-    diffuse = diffuse * diffuse;
-
-    // Edge vignette along strip width
-    float edge = abs(vV - 0.5) * 2.0;
-    float vignette = 1.0 - edge * edge * edge * uEdgeVignette;
-
-    float light = mix(uLightMin, uLightMax, diffuse * vignette * edgeShadow);
 
     // Analytical AA: fade alpha to 0 over exactly 1 pixel at top/bottom ribbon edges
     float dvV = fwidth(vV);
     float edgeAlpha = smoothstep(0.0, dvV, vV) * smoothstep(1.0, 1.0 - dvV, vV);
 
-    gl_FragColor = vec4(col.rgb * light, edgeAlpha);
+    gl_FragColor = vec4(col.rgb, edgeAlpha);
     #include <colorspace_fragment>
   }
 `;
@@ -254,27 +226,6 @@ function FilmStrip({
       },
       zDepth: { value: 3.2, min: 0, max: 4, step: 0.1, label: "Z Depth" },
     }),
-    lighting: folder({
-      lightX: { value: -0.8, min: -1, max: 1, step: 0.05, label: "Light X" },
-      lightY: { value: 0.25, min: -1, max: 1, step: 0.05, label: "Light Y" },
-      lightZ: { value: 1.0, min: 0, max: 2, step: 0.05, label: "Light Z" },
-      lightMin: { value: 0.6, min: 0, max: 1, step: 0.05, label: "Light Min" },
-      lightMax: {
-        value: 1.0,
-        min: 0.5,
-        max: 1.5,
-        step: 0.05,
-        label: "Light Max",
-      },
-      edgeVignette: {
-        value: 0.3,
-        min: 0,
-        max: 1,
-        step: 0.05,
-        label: "Edge Vignette",
-      },
-      backColor: { value: "#7A5C3E", label: "Back Color" },
-    }),
   });
 
   const uniforms = useMemo(
@@ -296,15 +247,6 @@ function FilmStrip({
       uStripH: { value: config.stripH },
       uTwist: { value: config.twist },
       uFlatZone: { value: config.flatZone },
-      uLightDir: {
-        value: new THREE.Vector3(config.lightX, config.lightY, config.lightZ),
-      },
-      uLightMin: { value: config.lightMin },
-      uLightMax: { value: config.lightMax },
-      uEdgeVignette: { value: config.edgeVignette },
-      uBackColor: {
-        value: new THREE.Color(config.backColor).convertSRGBToLinear(),
-      },
       uFX: { value: 0.0 },
       uWiggle: { value: 0.0 },
       uTime: { value: 0.0 },
@@ -341,12 +283,6 @@ function FilmStrip({
     u.uStripH.value = config.stripH;
     u.uTwist.value = config.twist;
     u.uFlatZone.value = config.flatZone;
-    u.uLightDir.value.set(config.lightX, config.lightY, config.lightZ);
-    u.uLightMin.value = config.lightMin;
-    u.uLightMax.value = config.lightMax;
-    u.uEdgeVignette.value = config.edgeVignette;
-    u.uBackColor.value.set(config.backColor).convertSRGBToLinear();
-
     // FX: scroll-velocity driven chromatic aberration + photo negative
     // lenis.velocity is px/ms (GSAP ticker passes seconds → raf(time*1000) → ms delta)
     // typical scroll = 0.3–1.5 px/ms; multiply by 2 so effect peaks at ~0.5 px/ms
