@@ -17,6 +17,11 @@ export default function Home() {
             Book
           </Link>
         </li>
+        <li>
+          <Link href="/blobs" className="underline-offset-4 hover:underline">
+            Blobs
+          </Link>
+        </li>
       </ul>
     </div>
   );
