@@ -194,9 +194,20 @@ const mainFragment = /* glsl */ `
     float sketchMask = transSketch;
     vec3 color = mix(video, sketch, sketchMask);
 
-    // Sharp full-screen flash right before sketch resolves
-    float shine = exp(-pow((uTransition - 0.78) * 24.0, 2.0)) * 0.45;
-    color += vec3(shine);
+    // Brief chromatic aberration flash mid-transition
+    float caStr = exp(-pow((uTransition - 0.88) * 14.0, 2.0)) * 0.003;
+    float caR = mix(
+      texture2D(uVideo, (vUv + vec2(caStr, 0.0) + coverDisp - 0.5) * fZoom + 0.5).r,
+      texture2D(uVideoNext, (vUv + vec2(caStr, 0.0) + settleDisp - 0.5) * tZoom + 0.5).r,
+      intpl
+    );
+    float caB = mix(
+      texture2D(uVideo, (vUv - vec2(caStr, 0.0) + coverDisp - 0.5) * fZoom + 0.5).b,
+      texture2D(uVideoNext, (vUv - vec2(caStr, 0.0) + settleDisp - 0.5) * tZoom + 0.5).b,
+      intpl
+    );
+    color.r += caR - video.r;
+    color.b += caB - video.b;
 
     // Film grain (only on sketch areas)
     vec2 grainSeed = vUv * uResolution + uTime * 1000.0;
