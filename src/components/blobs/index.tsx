@@ -170,7 +170,7 @@ const mainFragment = /* glsl */ `
 
     // Settle displacement — incoming starts displaced, flash fires, then eases into place
     float settleStr = smoothstep(0.0, 0.05, intpl) * smoothstep(1.0, 0.88, uTransition);
-    vec2 settleDisp = (texture2D(uDisplacement, vUv * 2.0 + uTime * 0.05).rg - 0.5) * 0.03 * settleStr;
+    vec2 settleDisp = (texture2D(uDisplacement, vUv * 2.0 + uTime * 0.05).rg - 0.5) * 0.015 * settleStr;
 
     // Subtle zoom: outgoing zooms in, incoming zooms out
     float fZoom = 1.0 - intpl * ZOOM;
@@ -252,7 +252,7 @@ function VideoPlane({ slots }: { slots: VideoSlot[] }) {
   const isTransitioning = useRef(false);
   const swapPending = useRef(false);
   const tweenRef = useRef<gsap.core.Tween | null>(null);
-  const TRANSITION_DURATION = 3.0;
+  const TRANSITION_DURATION = 1.8;
 
   const startTransition = useCallback(() => {
     transitionRef.current = 0;
