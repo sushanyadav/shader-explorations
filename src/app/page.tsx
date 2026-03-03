@@ -22,6 +22,11 @@ export default function Home() {
             Blobs
           </Link>
         </li>
+        <li>
+          <Link href="/sketch" className="underline-offset-4 hover:underline">
+            Sketch
+          </Link>
+        </li>
       </ul>
     </div>
   );
