@@ -18,8 +18,8 @@ export default function Home() {
           </Link>
         </li>
         <li>
-          <Link href="/blobs" className="underline-offset-4 hover:underline">
-            Blobs
+          <Link href="/sketch-wipe" className="underline-offset-4 hover:underline">
+            Sketch Wipe
           </Link>
         </li>
         <li>

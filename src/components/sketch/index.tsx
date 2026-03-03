@@ -164,7 +164,7 @@ function SketchPlane({ slot }: { slot: VideoSlot }) {
 
   const mouseUv = useRef(new THREE.Vector2(-1, -1));
 
-  const controls = useControls("Blueprint", {
+  const controls = useControls("Sketch Reveal", {
     decayRate: { value: 0.95, min: 0.8, max: 1.0, step: 0.005 },
     brushRadius: { value: 0.25, min: 0.05, max: 1.0, step: 0.01 },
     edgeThreshold: { value: 0.001, min: 0, max: 0.1, step: 0.0005 },

@@ -248,7 +248,7 @@ function VideoPlane({ slots }: { slots: VideoSlot[] }) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const { viewport, gl, size } = useThree();
 
-  const controls = useControls("Blueprint", {
+  const controls = useControls("Sketch Wipe", {
     tonalLevels: { value: 6, min: 2, max: 24, step: 1 },
     grainIntensity: { value: 0.08, min: 0.0, max: 1.0, step: 0.005 },
   });
@@ -386,7 +386,7 @@ function VideoPlane({ slots }: { slots: VideoSlot[] }) {
 
 /* ─── Experience wrapper ─── */
 
-export function BlobsExperience() {
+export function SketchWipeExperience() {
   const [slots, setSlots] = useState<VideoSlot[] | null>(null);
 
   useEffect(() => {
