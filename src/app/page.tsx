@@ -27,6 +27,11 @@ export default function Home() {
             Sketch
           </Link>
         </li>
+        <li>
+          <Link href="/impact" className="underline-offset-4 hover:underline">
+            Impact Frame
+          </Link>
+        </li>
       </ul>
     </div>
   );
