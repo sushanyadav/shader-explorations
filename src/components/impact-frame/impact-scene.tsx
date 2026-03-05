@@ -320,7 +320,7 @@ export function ImpactScene({ onReady }: ImpactSceneProps) {
   const matRef = useRef<THREE.ShaderMaterial>(null);
   const { viewport, size } = useThree();
 
-  const video = useStackedVideo("/videos/gojo-impact.mp4");
+  const video = useStackedVideo("/videos/kung-fu-panda.mp4");
   const holdState = useHoldProgress();
   const fx = useStaggeredEffects(holdState.progress);
 

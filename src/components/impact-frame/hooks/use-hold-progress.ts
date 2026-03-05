@@ -70,34 +70,29 @@ export function useHoldProgress(): HoldState {
     peakTriggered: false,
   });
 
-  /* ─── Pointer handlers ─── */
+  /* ─── Shared start/stop helpers ─── */
 
-  const onPointerDown = useCallback(
-    (e: PointerEvent) => {
+  const startHold = useCallback(
+    (origin: [number, number]) => {
+      if (isDownRef.current) return; // already holding
       isDownRef.current = true;
+      originRef.current = origin;
 
-      // Store click position as UV (0..1)
-      const rect = gl.domElement.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      const y = 1.0 - (e.clientY - rect.top) / rect.height; // flip Y for UV
-      originRef.current = [x, y];
-
-      // Start or resume building
       holdStartRef.current = performance.now() / 1000;
       progressAtHoldStart.current = Math.max(0, progressRef.current);
       phaseRef.current = "building";
     },
-    [gl]
+    []
   );
 
-  const onPointerUp = useCallback(() => {
+  const stopHold = useCallback(() => {
+    if (!isDownRef.current) return;
     isDownRef.current = false;
 
     if (
       phaseRef.current === "building" ||
       phaseRef.current === "peak"
     ) {
-      // Start spring revert
       phaseRef.current = "reverting";
       springState.current = {
         value: progressRef.current,
@@ -106,18 +101,57 @@ export function useHoldProgress(): HoldState {
     }
   }, []);
 
+  /* ─── Pointer handlers ─── */
+
+  const onPointerDown = useCallback(
+    (e: PointerEvent) => {
+      const rect = gl.domElement.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = 1.0 - (e.clientY - rect.top) / rect.height;
+      startHold([x, y]);
+    },
+    [gl, startHold]
+  );
+
+  const onPointerUp = useCallback(() => {
+    stopHold();
+  }, [stopHold]);
+
+  /* ─── Keyboard handlers (space) ─── */
+
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.repeat) return;
+      e.preventDefault();
+      startHold([0.5, 0.5]);
+    },
+    [startHold]
+  );
+
+  const onKeyUp = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      stopHold();
+    },
+    [stopHold]
+  );
+
   /* ─── Attach/detach listeners ─── */
 
   useEffect(() => {
     const canvas = gl.domElement;
     canvas.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
 
     return () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
     };
-  }, [gl, onPointerDown, onPointerUp]);
+  }, [gl, onPointerDown, onPointerUp, onKeyDown, onKeyUp]);
 
   /* ─── Per-frame update ─── */
 
