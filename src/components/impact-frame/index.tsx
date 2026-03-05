@@ -23,7 +23,7 @@ export function ImpactExperience() {
   const [ready, setReady] = useState(false);
 
   return (
-    <>
+    <div className="select-none">
       <Leva />
       {!ready && <Loader />}
       <div className="fixed inset-0">
@@ -42,6 +42,6 @@ export function ImpactExperience() {
         </Canvas>
       </div>
       <Onomatopoeia />
-    </>
+    </div>
   );
 }
