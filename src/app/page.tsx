@@ -32,6 +32,11 @@ export default function Home() {
             Impact Frame
           </Link>
         </li>
+        <li>
+          <Link href="/paper-flap" className="underline-offset-4 hover:underline">
+            Paper Flap
+          </Link>
+        </li>
       </ul>
     </div>
   );
